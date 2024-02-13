@@ -11,14 +11,15 @@ import { verifyPassword } from "@/src/features/auth/lib/emailPassword";
 import { parseFlags } from "@/src/features/feature-flags/utils";
 import { env } from "@/src/env.mjs";
 import { createProjectMembershipsOnSignup } from "@/src/features/auth/lib/createProjectMembershipsOnSignup";
-import { type Adapter } from "next-auth/adapters";
-
+import { type Adapter, type AdapterAccount } from "next-auth/adapters";
+import { type Awaitable} from "next-auth/core/types";
 // Providers
 import { type Provider } from "next-auth/providers";
 import CredentialsProvider from "next-auth/providers/credentials";
 import GoogleProvider from "next-auth/providers/google";
 import GitHubProvider from "next-auth/providers/github";
 import AzureADProvider from "next-auth/providers/azure-ad";
+import KeyCloakProvider from "next-auth/providers/keycloak";
 
 // Use secure cookies on https hostnames, exception for Vercel which sets NEXTAUTH_URL without the protocol
 const useSecureCookies =
@@ -129,8 +130,21 @@ if (
     }),
   );
 
+if (
+  env.AUTH_KEYCLOAK_CLIENT_ID &&
+  env.AUTH_KEYCLOAK_CLIENT_SECRET &&
+  env.AUTH_KEYCLOAK_URL
+)
+  providers.push(
+    KeyCloakProvider({
+      clientId: env.AUTH_KEYCLOAK_CLIENT_ID,
+      clientSecret: env.AUTH_KEYCLOAK_CLIENT_SECRET,
+      issuer: env.AUTH_KEYCLOAK_URL,
+      
+    })
+  )
 // Extend Prisma Adapter
-const prismaAdapter = PrismaAdapter(prisma);
+const prismaAdapter:Adapter = PrismaAdapter(prisma);
 const extendedPrismaAdapter: Adapter = {
   ...prismaAdapter,
   async createUser(profile) {
@@ -145,13 +159,19 @@ const extendedPrismaAdapter: Adapter = {
           JSON.stringify(profile),
       );
     }
-
     const user = await prismaAdapter.createUser(profile);
-
     await createProjectMembershipsOnSignup(user);
-
     return user;
   },
+  linkAccount(account:AdapterAccount) :  Promise<void> |Awaitable<AdapterAccount | null | undefined>{
+    account["not_before_policy"] = account["not-before-policy"];
+    delete account["not-before-policy"];
+    // Ensure the method is defined before calling
+    if (typeof prismaAdapter.linkAccount !== 'function') {
+      throw new Error("linkAccount method is not implemented in the base adapter");
+    }
+    return  prismaAdapter.linkAccount(account);
+  }
 };
 
 /**
